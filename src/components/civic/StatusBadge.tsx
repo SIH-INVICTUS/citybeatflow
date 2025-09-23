@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export type IssueStatus = 'pending' | 'verified' | 'in-progress' | 'resolved' | 'rejected';
 
 interface StatusBadgeProps {
-  status: IssueStatus;
+  status?: IssueStatus | string;
   className?: string;
 }
 
@@ -32,17 +32,17 @@ const statusConfig = {
 };
 
 const StatusBadge = ({ status, className }: StatusBadgeProps) => {
-  const config = statusConfig[status];
-  
+  const config = (status && (statusConfig as any)[status]) || { label: String(status ?? 'Unknown'), className: 'bg-muted text-foreground' };
+
   return (
-    <Badge 
+    <Badge
       className={cn(
         'px-2 py-1 text-xs font-medium border-0',
-        config.className,
+        (config && config.className) || 'bg-muted text-foreground',
         className
       )}
     >
-      {config.label}
+      {config && config.label ? config.label : String(status ?? 'Unknown')}
     </Badge>
   );
 };

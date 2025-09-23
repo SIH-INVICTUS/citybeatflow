@@ -31,12 +31,12 @@ const CitizenDashboard = () => {
           email ? apiGet<Issue[]>(`/api/issues?reporter=${encodeURIComponent(email)}`) : Promise.resolve([] as Issue[]),
         ]);
         const all = [...local, ...serverIssues];
-        const filtered = all.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
+        const filtered = all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number' && withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
         setNearbyIssues(filtered);
         if (myServerIssues.length) setUserIssues(myServerIssues);
       } catch {
         const all = [...local, ...mockIssues];
-        const filtered = all.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
+        const filtered = all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number' && withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
         setNearbyIssues(filtered);
       }
     })();
@@ -51,7 +51,7 @@ const CitizenDashboard = () => {
   const escalateReport = async (id: string) => {
     try {
       await apiPost(`/api/issues/${id}/escalate`, {});
-      setUserIssues(prev => prev.map(u => u._id === id ? { ...u, escalated: true } : u));
+      setUserIssues(prev => prev.map(u => (u._id === id || u.id === id) ? { ...u, escalated: true } : u));
     } catch (err) {
       // ignore
     }
@@ -182,7 +182,7 @@ const CitizenDashboard = () => {
                         </p>
                       </div>
                       <div className="text-right space-y-2">
-                        <StatusBadge status={issue.status} />
+                        <StatusBadge status={issue?.status || 'pending'} />
                         <Badge variant="outline" className="text-xs">
                           {issue.verificationCount} verifications
                         </Badge>
@@ -190,7 +190,7 @@ const CitizenDashboard = () => {
                     </div>
                   ))}
                     {userIssues.map(u => (
-                      <Card key={u._id}>
+                      <Card key={u._id || u.id}>
                         <CardContent>
                           <div className="flex items-start justify-between">
                             <div>
@@ -199,14 +199,14 @@ const CitizenDashboard = () => {
                               {u.escalated && <div className="text-xs text-warning">Escalated</div>}
                             </div>
                             <div className="text-right">
-                              <StatusBadge status={u.status as any} />
+                              <StatusBadge status={(u as any)?.status || 'pending'} />
                             </div>
                           </div>
                           <div className="pt-3 flex gap-2">
                             {!u.escalated && (
-                              <Button variant="outline" onClick={() => escalateReport(u._id)}>Escalate</Button>
+                              <Button variant="outline" onClick={() => escalateReport(u._id || u.id)}>Escalate</Button>
                             )}
-                            <Button onClick={() => navigate(`/citizen/report/${u._id}`)}>View</Button>
+                            <Button onClick={() => navigate(`/citizen/report/${u._id || u.id}`)}>View</Button>
                           </div>
                         </CardContent>
                       </Card>
@@ -234,7 +234,7 @@ const CitizenDashboard = () => {
                         </p>
                       </div>
                       <div className="space-y-2">
-                        <StatusBadge status={issue.status} />
+                        <StatusBadge status={issue?.status || 'pending'} />
                         <Button variant="outline" size="sm">
                           Verify Issue
                         </Button>

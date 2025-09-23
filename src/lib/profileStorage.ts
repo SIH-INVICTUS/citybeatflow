@@ -4,6 +4,7 @@ export type UserProfile = {
   phone: string;
   gender: "male" | "female" | "other" | "prefer-not-to-say" | "";
   dateOfBirth: string; // ISO date
+  notifyByEmail?: boolean;
 };
 
 const PROFILE_KEY = "citizen-user-profile";
@@ -19,9 +20,10 @@ export function getProfile(): UserProfile {
       phone: parsed.phone || "",
       gender: parsed.gender || "",
       dateOfBirth: parsed.dateOfBirth || "",
+      notifyByEmail: typeof parsed.notifyByEmail === 'undefined' ? true : !!parsed.notifyByEmail,
     };
   } catch {
-    return { fullName: "", email: "", phone: "", gender: "", dateOfBirth: "" };
+    return { fullName: "", email: "", phone: "", gender: "", dateOfBirth: "", notifyByEmail: true };
   }
 }
 

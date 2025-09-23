@@ -10,6 +10,7 @@ import ReportIssue from "./pages/citizen/ReportIssue";
 import Profile from "./pages/citizen/Profile";
 import AdminDashboard from "./pages/admin/Dashboard";
 import NGODashboard from "./pages/ngo/Dashboard";
+import IssueDetails from "./pages/IssueDetails";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,6 +29,7 @@ const App = () => (
           <Route path="/citizen/profile" element={<Profile />} />
           <Route path="/admin/dashboard" element={<AdminDashboard />} />
           <Route path="/ngo/dashboard" element={<NGODashboard />} />
+          <Route path="/issues/:id" element={<IssueDetails />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

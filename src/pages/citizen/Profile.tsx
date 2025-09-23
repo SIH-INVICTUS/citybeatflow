@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Toggle } from '@/components/ui/toggle';
 import { getProfile, saveProfile, clearProfile, type UserProfile } from "@/lib/profileStorage";
 import { apiGet, apiPost } from "@/lib/api";
 import { useNavigate } from "react-router-dom";
@@ -104,6 +105,16 @@ const Profile = () => {
             <div>
               <Label htmlFor="dob">Date of Birth</Label>
               <Input id="dob" type="date" value={profile.dateOfBirth} onChange={(e) => update("dateOfBirth", e.target.value)} className="mt-1" />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label>Notify me by email</Label>
+                <p className="text-sm text-muted-foreground">Receive email updates when your reports change status or NGOs post updates.</p>
+              </div>
+              <div>
+                <Toggle pressed={!!profile.notifyByEmail} onPressedChange={(v) => update('notifyByEmail' as any, !!v)} />
+              </div>
             </div>
 
             <div className="flex gap-3 pt-2">

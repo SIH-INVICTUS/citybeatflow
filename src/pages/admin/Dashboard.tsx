@@ -11,7 +11,8 @@ import { mockIssues, categoryIcons, departmentColors } from "@/data/mockData";
 import { getStoredIssues } from "@/lib/issuesStorage";
 import { municipalCenter, withinRadius } from "@/lib/geo";
 import { useEffect, useState } from "react";
-import { apiGet, apiPut } from "@/lib/api";
+import { apiGet, apiPut, apiPost } from "@/lib/api";
+import { useNavigate } from 'react-router-dom';
 
 const AdminDashboard = () => {
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -49,6 +50,7 @@ const AdminDashboard = () => {
   ];
 
   const [serverIssues, setServerIssues] = useState<any[]>([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     (async () => {
@@ -62,16 +64,33 @@ const AdminDashboard = () => {
   }, []);
 
   const allIssues = [...getStoredIssues(), ...mockIssues, ...serverIssues];
-  const muniScoped = allIssues.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 50));
+  const muniScoped = allIssues.filter(i => {
+    if (!i?.location || typeof i.location.lat !== 'number' || typeof i.location.lng !== 'number') return false;
+    return withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 50);
+  });
   const filteredIssues = muniScoped.filter(issue => {
     const statusMatch = filterStatus === "all" || issue.status === filterStatus;
     const categoryMatch = filterCategory === "all" || issue.category === filterCategory;
     return statusMatch && categoryMatch;
   });
 
-  const highPriorityIssues = mockIssues.filter(issue => 
-    issue.verificationCount >= 5 && ['high', 'critical'].includes(issue.priority)
+  // derive high priority issues from collected issues (not only mock data)
+  const highPriorityIssues = allIssues.filter(issue =>
+    (issue.verificationCount || 0) >= 5 && ['high', 'critical'].includes(issue.priority as any)
   );
+
+  const changeStatus = async (issueId: string, newStatus: string) => {
+    try {
+      await apiPut(`/api/issues/${issueId}/status`, { status: newStatus });
+      // also add a human-readable update so it's persisted and notifies reporter
+      await apiPost(`/api/issues/${issueId}/add-update`, { text: `Status changed to ${newStatus} by admin`, status: newStatus, by: 'admin' });
+      // refresh issues
+      const issues = await apiGet<any[]>('/api/issues');
+      setServerIssues(issues || []);
+    } catch (err) {
+      // ignore for now
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -113,15 +132,15 @@ const AdminDashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {highPriorityIssues.map((issue) => (
-                  <div key={issue.id} className="flex items-center gap-4 p-3 bg-background rounded-lg border">
+                {highPriorityIssues.map((issue, idx) => (
+                  <div key={issue._id || issue.id || `hp-${idx}`} className="flex items-center gap-4 p-3 bg-background rounded-lg border">
                     <div className="text-xl">{categoryIcons[issue.category]}</div>
                     <div className="flex-1">
                       <h3 className="font-semibold text-foreground">{issue.title}</h3>
-                      <p className="text-sm text-muted-foreground">{issue.location.address}</p>
+                      <p className="text-sm text-muted-foreground">{issue?.location?.address || 'Location not provided'}</p>
                     </div>
-                    <Badge variant="destructive">{issue.verificationCount} verifications</Badge>
-                    <Badge className="bg-destructive text-destructive-foreground">{issue.priority} priority</Badge>
+                    <Badge variant="destructive">{issue?.verificationCount ?? 0} verifications</Badge>
+                    <Badge className="bg-destructive text-destructive-foreground">{issue?.priority || 'unknown'} priority</Badge>
                   </div>
                 ))}
               </div>
@@ -187,25 +206,25 @@ const AdminDashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {filteredIssues.map((issue) => (
+              {filteredIssues.map((issue, idx) => (
                 <div 
-                  key={issue.id} 
+                  key={issue._id || issue.id || `fi-${idx}`} 
                   className={`flex items-center gap-4 p-4 border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer
-                    ${issue.verificationCount >= 5 ? 'border-primary bg-primary/5' : ''}`}
+                    ${(issue?.verificationCount || 0) >= 5 ? 'border-primary bg-primary/5' : ''}`}
                 >
                   <div className="text-2xl">{categoryIcons[issue.category]}</div>
                   
                   <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <h3 className="font-semibold text-foreground">{issue.title}</h3>
-                      <p className="text-sm text-muted-foreground">{issue.location.address}</p>
-                      <p className="text-xs text-muted-foreground">
-                        Reported by {issue.reportedBy} • {new Date(issue.reportedAt).toLocaleDateString()}
-                      </p>
+                        <p className="text-sm text-muted-foreground">{issue?.location?.address || 'Location not provided'}</p>
+                        <p className="text-xs text-muted-foreground">
+                          Reported by {issue.reportedBy || issue.reporterEmail || 'anonymous'} • {issue.reportedAt ? new Date(issue.reportedAt).toLocaleDateString() : ''}
+                        </p>
                     </div>
                     
                     <div className="space-y-1">
-                      <StatusBadge status={issue.status} />
+                      <StatusBadge status={issue?.status || 'pending'} />
                       {issue.department && (
                         <Badge variant="outline" className="text-xs">
                           {issue.department}
@@ -231,22 +250,25 @@ const AdminDashboard = () => {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2">
-                    <Button variant="civic" size="sm" onClick={() => alert('View details not implemented') }>
-                      View Details
-                    </Button>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" onClick={async () => { await apiPut(`/api/issues/${issue._id || issue.id}/status`, { status: 'in-progress' }); alert('Marked in-progress'); }}>
-                        Start Processing
+                    <div className="flex flex-col gap-2">
+                      {issue.claimedByNGO && (
+                        <div className="text-sm text-muted-foreground">Adopted by <strong>{issue.claimedByNGO}</strong></div>
+                      )}
+                      <Button variant="civic" size="sm" onClick={() => navigate(`/issues/${issue._id || issue.id}`)}>
+                        View Details
                       </Button>
-                      <Button variant="destructive" size="sm" onClick={async () => { await apiPut(`/api/issues/${issue._id || issue.id}/status`, { status: 'rejected' }); alert('Rejected'); }}>
-                        Reject
-                      </Button>
-                      <Button variant="civic" size="sm" onClick={async () => { await apiPut(`/api/issues/${issue._id || issue.id}/status`, { status: 'solved' }); alert('Marked solved'); }}>
-                        Mark Solved
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={async () => { await changeStatus(issue._id || issue.id, 'in-progress'); }}>
+                          Start Processing
+                        </Button>
+                        <Button variant="destructive" size="sm" onClick={async () => { await changeStatus(issue._id || issue.id, 'rejected'); }}>
+                          Reject
+                        </Button>
+                        <Button variant="civic" size="sm" onClick={async () => { await changeStatus(issue._id || issue.id, 'resolved'); }}>
+                          Mark Resolved
+                        </Button>
+                      </div>
                     </div>
-                  </div>
                 </div>
               ))}
             </div>

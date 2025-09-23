@@ -12,10 +12,15 @@ const NGODashboard = () => {
     (async () => {
       try {
         const ngoEmail = localStorage.getItem('auth_email') || '';
+        const ngoName = localStorage.getItem('auth_name') || ngoEmail;
         const events = await apiGet<any[]>(`/api/events?ngo=${encodeURIComponent(ngoEmail)}`);
         setEvents(events || []);
-        const claimed = await apiGet<any[]>(`/api/issues?claimedByNGO=${encodeURIComponent(ngoEmail)}`);
+        // fetch issues and split between claimed-by-this-ngo and available
+        const all = await apiGet<any[]>('/api/issues');
+        const claimed = (all || []).filter(i => i && i.claimedByNGO && i.claimedByNGO === ngoName);
+        const available = (all || []).filter(i => i && !i.claimedByNGO);
         setClaims(claimed || []);
+        setAvailableIssues(available || []);
       } catch (err) {
         // ignore for now
       }
@@ -23,9 +28,26 @@ const NGODashboard = () => {
   }, []);
 
   const claimIssue = async (id: string) => {
-    const ngoName = localStorage.getItem('auth_name') || localStorage.getItem('auth_email') || 'NGO';
-    await apiPost(`/api/issues/${id}/claim`, { ngo: ngoName });
-    setClaims(prev => prev.map(c => c._id === id ? { ...c, claimedByNGO: ngoName, claimStatus: 'claimed' } : c));
+    const ngoEmail = localStorage.getItem('auth_email') || '';
+    const ngoName = localStorage.getItem('auth_name') || ngoEmail;
+    try {
+      await apiPost(`/api/ngo/issues/${id}/claim`, { ngoEmail });
+      // refresh lists
+      const all = await apiGet<any[]>('/api/issues');
+      const claimed = (all || []).filter(i => i && i.claimedByNGO && i.claimedByNGO === ngoName);
+      const available = (all || []).filter(i => i && !i.claimedByNGO);
+      setClaims(claimed || []);
+      setAvailableIssues(available || []);
+    } catch (err) {
+      // ignore
+    }
+  };
+
+  // local state for available issues
+  const [availableIssues, setAvailableIssues] = useState<any[]>([]);
+
+  const navigate = (path: string) => {
+    window.location.href = path;
   };
 
   return (
@@ -66,7 +88,30 @@ const NGODashboard = () => {
                       <div className="font-semibold">{c.title}</div>
                       <div className="text-sm text-muted-foreground">{c.description}</div>
                       <div className="pt-2">
-                        <Button onClick={() => alert('Add update UI not implemented')}>Add Update</Button>
+                        <Button onClick={() => navigate(`/issues/${c._id}`)} className="ml-2">View Details</Button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+        <div className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Available Reports to Adopt</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {availableIssues.length === 0 ? <p className="text-sm text-muted-foreground">No available reports to adopt right now.</p> : (
+                <ul className="space-y-3">
+                  {availableIssues.map(a => (
+                    <li key={a._id} className="border p-3 rounded">
+                      <div className="font-semibold">{a.title}</div>
+                      <div className="text-sm text-muted-foreground">{a.description}</div>
+                      <div className="pt-2">
+                        <Button onClick={() => claimIssue(a._id)}>Adopt</Button>
+                        <Button onClick={() => navigate(`/issues/${a._id}`)} className="ml-2">View Details</Button>
                       </div>
                     </li>
                   ))}

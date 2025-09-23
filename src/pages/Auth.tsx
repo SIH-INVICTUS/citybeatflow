@@ -33,13 +33,23 @@ const Auth = () => {
     try {
       setIsSubmitting(true);
       if (isLogin) {
-        const res = await apiPost<{ token: string; user: { role: string } }>("/api/auth/login", { email, password });
-        setAuthToken(res.token);
-        localStorage.setItem('auth_token', res.token);
-        localStorage.setItem('auth_email', email || '');
-        localStorage.setItem('auth_role', res.user.role || 'citizen');
-        const routes: Record<string, string> = { citizen: '/citizen/dashboard', ngo: '/citizen/dashboard', admin: '/admin/dashboard' };
-        navigate(routes[res.user.role] || '/');
+        if (userType === 'ngo') {
+          const res = await apiPost<{ token: string; ngo: any }>("/api/ngo/auth/login", { email, password });
+          setAuthToken(res.token);
+          localStorage.setItem('auth_token', res.token);
+          localStorage.setItem('auth_email', email || '');
+          localStorage.setItem('auth_role', 'ngo');
+          localStorage.setItem('auth_name', res.ngo?.name || '');
+          navigate('/ngo/dashboard');
+        } else {
+          const res = await apiPost<{ token: string; user: { role: string } }>("/api/auth/login", { email, password });
+          setAuthToken(res.token);
+          localStorage.setItem('auth_token', res.token);
+          localStorage.setItem('auth_email', email || '');
+          localStorage.setItem('auth_role', res.user.role || 'citizen');
+          const routes: Record<string, string> = { citizen: '/citizen/dashboard', ngo: '/citizen/dashboard', admin: '/admin/dashboard' };
+          navigate(routes[res.user.role] || '/');
+        }
       } else {
         // Require role passcode only for NGO/Admin at signup
         if ((userType === 'ngo' && rolePasscode !== 'NGO25') || (userType === 'admin' && rolePasscode !== 'ADMIN25')) {
@@ -85,14 +95,15 @@ const Auth = () => {
   };
 
   const currentConfig = userTypeConfig[userType];
+  const Icon = currentConfig.icon;
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      
+
       <div className="container py-8">
-        <Button 
-          variant="ghost" 
+        <Button
+          variant="ghost"
           onClick={() => navigate('/')}
           className="mb-6"
         >
@@ -104,12 +115,12 @@ const Auth = () => {
           <Card className="shadow-civic">
             <CardHeader className="text-center pb-6">
               <div className={`h-16 w-16 rounded-full bg-gradient-primary flex items-center justify-center mx-auto mb-4`}>
-                <currentConfig.icon className={`h-8 w-8 text-primary-foreground`} />
+                <Icon className={`h-8 w-8 text-primary-foreground`} />
               </div>
               <CardTitle className="text-2xl">{currentConfig.title}</CardTitle>
               <p className="text-muted-foreground">{currentConfig.description}</p>
             </CardHeader>
-            
+
             <CardContent className="space-y-6">
               {/* User Type Selector */}
               <div className="space-y-2">
@@ -125,22 +136,29 @@ const Auth = () => {
 
               {/* Auth Form */}
               <form onSubmit={handleAuth} className="space-y-4">
+                {!isLogin && (
+                  <div className="space-y-2">
+                    <Label htmlFor="name">Full name</Label>
+                    <Input id="name" placeholder="Your full name" />
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input 
+                  <Input
                     id="email"
-                    type="email" 
+                    type="email"
                     placeholder="you@example.com"
                     required
                   />
                 </div>
-                
+
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
                   <div className="flex gap-2">
-                    <Input 
+                    <Input
                       id="password"
-                      type={showPassword ? 'text' : 'password'} 
+                      type={showPassword ? 'text' : 'password'}
                       placeholder={isLogin ? 'Your password' : 'Min 6 characters'}
                       required
                     />
@@ -149,6 +167,13 @@ const Auth = () => {
                     </Button>
                   </div>
                 </div>
+
+                {!isLogin && (
+                  <div className="space-y-2">
+                    <Label htmlFor="organization">Organization (optional)</Label>
+                    <Input id="organization" placeholder="Your organization or NGO name" />
+                  </div>
+                )}
 
                 {!isLogin && (userType === 'ngo' || userType === 'admin') && (
                   <div className="space-y-2">
@@ -164,45 +189,21 @@ const Auth = () => {
                   </div>
                 )}
 
-                {!isLogin && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="name">Full Name</Label>
-                      <Input 
-                        id="name"
-                        placeholder="e.g. Priya Sharma"
-                        required
-                      />
-                    </div>
-                    
-                    {userType === 'ngo' && (
-                      <div className="space-y-2">
-                        <Label htmlFor="organization">Organization Name</Label>
-                        <Input id="organization" placeholder="e.g. City Helpers Foundation" required />
-                      </div>
-                    )}
-                  </>
-                )}
-
-                <Button 
-                  type="submit" 
-                  variant="civic"
-                  className="w-full"
-                  size="lg"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (isLogin ? 'Signing in...' : 'Creating account...') : (isLogin ? 'Sign In' : 'Create Account')}
-                </Button>
+                <div className="pt-4">
+                  <Button type="submit" size="lg" disabled={isSubmitting}>
+                    {isSubmitting ? (isLogin ? 'Signing in...' : 'Creating account...') : (isLogin ? 'Sign In' : 'Create Account')}
+                  </Button>
+                </div>
               </form>
 
               <div className="text-center">
-                <Button 
-                  variant="link" 
+                <Button
+                  variant="link"
                   onClick={() => setIsLogin(!isLogin)}
                   className="text-sm"
                 >
-                  {isLogin 
-                    ? "Don't have an account? Sign up" 
+                  {isLogin
+                    ? "Don't have an account? Sign up"
                     : "Already have an account? Sign in"
                   }
                 </Button>

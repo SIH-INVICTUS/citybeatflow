@@ -46,7 +46,9 @@ export default function IssuesMap({ issues, center, zoom = 12, className }: Issu
       .then((maps) => {
         if (!mounted) return;
         setMapsLoaded(true);
-        const initialCenter = center || (issues.length ? { lat: issues[0].location.lat, lng: issues[0].location.lng } : { lat: 0, lng: 0 });
+  // safe initial center: use provided center, otherwise first issue with valid location, otherwise {0,0}
+  const firstValid = issues.find(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number');
+  const initialCenter = center || (firstValid ? { lat: firstValid.location.lat, lng: firstValid.location.lng } : { lat: 0, lng: 0 });
         mapRef.current = new maps.Map(containerRef.current as HTMLDivElement, {
           center: initialCenter,
           zoom,
@@ -83,6 +85,7 @@ export default function IssuesMap({ issues, center, zoom = 12, className }: Issu
     const bounds = new maps.LatLngBounds();
 
     issues.forEach((issue) => {
+      if (!issue?.location || typeof issue.location.lat !== 'number' || typeof issue.location.lng !== 'number') return;
       const pos = { lat: issue.location.lat, lng: issue.location.lng };
       const color = statusToHex(issue.status);
       const marker = new maps.Marker({

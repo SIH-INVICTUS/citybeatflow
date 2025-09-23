@@ -4,6 +4,10 @@ import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
+import fs from 'fs';
+import path from 'path';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -26,6 +30,55 @@ async function connectMongo() {
   }
 }
 connectMongo();
+
+// Email transporter (nodemailer) - configured via environment variables
+let mailer = null;
+const smtpHost = process.env.SMTP_HOST;
+const smtpPort = process.env.SMTP_PORT ? parseInt(process.env.SMTP_PORT, 10) : undefined;
+const smtpUser = process.env.SMTP_USER;
+const smtpPass = process.env.SMTP_PASS;
+const smtpFrom = process.env.SMTP_FROM || 'no-reply@citybeatflow.example';
+
+if (smtpHost && smtpPort && smtpUser && smtpPass) {
+  try {
+    mailer = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465, // true for 465, false for other ports
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    });
+    // verify transporter
+    mailer.verify().then(() => console.log('SMTP transporter ready')).catch((e) => console.warn('SMTP verify failed:', e.message));
+  } catch (e) {
+    console.warn('Failed to initialize mailer:', e.message);
+    mailer = null;
+  }
+} else {
+  console.log('SMTP not fully configured, emails will be skipped. Set SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS to enable.');
+}
+
+async function sendEmail(to, subject, text, html) {
+  if (!mailer) {
+    console.log(`Email skipped (no SMTP): to=${to}, subject=${subject}`);
+    return false;
+  }
+  try {
+    await mailer.sendMail({
+      from: smtpFrom,
+      to,
+      subject,
+      text,
+      html,
+    });
+    return true;
+  } catch (err) {
+    console.error('Failed to send email:', err && err.message ? err.message : err);
+    return false;
+  }
+}
 
 // Schemas
 const UserSchema = new mongoose.Schema(
@@ -97,6 +150,7 @@ const ProfileSchema = new mongoose.Schema(
     phone: { type: String, default: '' },
     gender: { type: String, default: '' },
     dateOfBirth: { type: String, default: '' },
+    notifyByEmail: { type: Boolean, default: true },
   },
   { timestamps: true }
 );
@@ -109,6 +163,15 @@ const NGO = mongoose.model('NGO', NGOSchema);
 
 // Routes
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+// Make sure uploads directory exists and serve it statically
+const uploadsDir = path.resolve('uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
+
+const upload = multer({ dest: uploadsDir });
 
 // Auth
 app.post('/api/auth/signup', async (req, res) => {
@@ -150,6 +213,43 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// --- NGO specific auth (separate route for NGOs) ---
+app.post('/api/ngo/auth/signup', async (req, res) => {
+  try {
+    const { name, email, password, profile, rolePasscode } = req.body || {};
+    if (!name || !email || !password) return res.status(400).json({ error: 'name, email and password are required' });
+    // simple passcode check to prevent casual signups
+    if (rolePasscode !== 'NGO25') return res.status(403).json({ error: 'Invalid NGO passcode' });
+    const existingUser = await User.findOne({ email });
+    if (existingUser) return res.status(409).json({ error: 'Email already registered' });
+    const passwordHash = await bcrypt.hash(password, 10);
+    const user = await User.create({ fullName: name, email, passwordHash, role: 'ngo', organization: name });
+    const ngo = await NGO.create({ name, email, profile: profile || '', impactStats: { issuesClaimed: 0, issuesSolved: 0, volunteerHours: 0, resourcesRaised: 0 } });
+    const token = jwt.sign({ sub: user._id.toString(), role: 'ngo' }, process.env.JWT_SECRET || 'dev', { expiresIn: '7d' });
+    res.status(201).json({ token, ngo });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'NGO signup failed' });
+  }
+});
+
+app.post('/api/ngo/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ error: 'email and password are required' });
+    const user = await User.findOne({ email });
+    if (!user || user.role !== 'ngo') return res.status(401).json({ error: 'Invalid NGO credentials' });
+    const ok = await bcrypt.compare(password, user.passwordHash);
+    if (!ok) return res.status(401).json({ error: 'Invalid NGO credentials' });
+    const ngo = await NGO.findOne({ email });
+    const token = jwt.sign({ sub: user._id.toString(), role: user.role }, process.env.JWT_SECRET || 'dev', { expiresIn: '7d' });
+    res.json({ token, ngo });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'NGO login failed' });
+  }
+});
+
 // Issues
 
 // Get issues by role
@@ -161,6 +261,19 @@ app.get('/api/issues', async (req, res) => {
   if (claimedByNGO) query = { claimedByNGO };
   const issues = await Issue.find(query).sort({ createdAt: -1 });
   res.json(issues);
+});
+
+// Get single issue by id
+app.get('/api/issues/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const issue = await Issue.findById(id);
+    if (!issue) return res.status(404).json({ error: 'Issue not found' });
+    res.json(issue);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch issue' });
+  }
 });
 
 // Escalate reports not processed in 10 days
@@ -176,6 +289,82 @@ app.post('/api/issues/:id/claim', async (req, res) => {
   const { ngo } = req.body;
   const issue = await Issue.findByIdAndUpdate(id, { claimedByNGO: ngo, claimStatus: 'claimed', status: 'community-in-progress' }, { new: true });
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  // notify reporter if email present
+  if (issue.reporterEmail) {
+    try {
+      const profile = await Profile.findOne({ email: issue.reporterEmail });
+      if (!profile || profile.notifyByEmail !== false) {
+        const subject = `Your report "${issue.title}" was adopted by ${ngo}`;
+        const text = `Good news — ${ngo} has adopted your report titled: ${issue.title}. The organization will follow up and update progress.`;
+        sendEmail(issue.reporterEmail, subject, text, `<p>${text}</p>`).catch(() => {});
+      } else {
+        console.log(`Skipping email to ${issue.reporterEmail} because notifyByEmail is false`);
+      }
+    } catch (e) {
+      // do not block the response for email errors
+      console.warn('Error checking profile for notify preference:', e && e.message ? e.message : e);
+    }
+  }
+  res.json(issue);
+});
+
+// NGO claim via NGO route - increments NGO stats and records status history
+app.post('/api/ngo/issues/:id/claim', async (req, res) => {
+  const { id } = req.params;
+  const { ngoEmail } = req.body;
+  const ngo = await NGO.findOne({ email: ngoEmail });
+  if (!ngo) return res.status(404).json({ error: 'NGO not found' });
+  const issue = await Issue.findById(id);
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  issue.claimedByNGO = ngo.name;
+  issue.claimStatus = 'claimed';
+  issue.status = 'community-in-progress';
+  issue.statusHistory = issue.statusHistory || [];
+  issue.statusHistory.push({ status: issue.status, date: new Date(), by: ngo.name });
+  await issue.save();
+  ngo.impactStats.issuesClaimed = (ngo.impactStats.issuesClaimed || 0) + 1;
+  await ngo.save();
+  res.json(issue);
+});
+
+// NGO posts updates to an issue (visible to reporter and verifiers)
+app.post('/api/ngo/issues/:id/update', async (req, res) => {
+  const { id } = req.params;
+  const { ngoEmail, text, status } = req.body || {};
+  const ngo = await NGO.findOne({ email: ngoEmail });
+  const issue = await Issue.findById(id);
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  const updateObj = { text: text || '', date: new Date(), by: ngo ? ngo.name : (ngoEmail || 'ngo') };
+  issue.updates = issue.updates || [];
+  issue.updates.push(updateObj);
+  if (status) {
+    issue.statusHistory = issue.statusHistory || [];
+    issue.statusHistory.push({ status, date: new Date(), by: ngo ? ngo.name : (ngoEmail || 'ngo') });
+    issue.status = status;
+    if (status === 'solved' || status === 'resolved') {
+      // increment NGO solved counter
+      if (ngo) {
+        ngo.impactStats.issuesSolved = (ngo.impactStats.issuesSolved || 0) + 1;
+        await ngo.save();
+      }
+    }
+  }
+  await issue.save();
+  // notify reporter about NGO update if they opted in
+  if (issue.reporterEmail) {
+    try {
+      const profile = await Profile.findOne({ email: issue.reporterEmail });
+      if (!profile || profile.notifyByEmail !== false) {
+        const subject = `Update on your report: ${issue.title}`;
+        const bodyText = `${updateObj.by} posted an update: ${updateObj.text || '(status change)'}${status ? '\nNew status: ' + status : ''}`;
+        sendEmail(issue.reporterEmail, subject, bodyText, `<p>${bodyText.replace(/\n/g, '<br/>')}</p>`).catch(() => {});
+      } else {
+        console.log(`Skipping NGO update email to ${issue.reporterEmail} because notifyByEmail is false`);
+      }
+    } catch (e) {
+      console.warn('Error checking profile for notify preference:', e && e.message ? e.message : e);
+    }
+  }
   res.json(issue);
 });
 
@@ -194,6 +383,29 @@ app.put('/api/issues/:id/status', async (req, res) => {
   const { status } = req.body;
   const issue = await Issue.findByIdAndUpdate(id, { status }, { new: true });
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  // add to status history
+  try {
+    issue.statusHistory = issue.statusHistory || [];
+    issue.statusHistory.push({ status, date: new Date(), by: 'admin' });
+    await issue.save();
+  } catch (e) {
+    // ignore
+  }
+  // email reporter
+  if (issue.reporterEmail) {
+    try {
+      const profile = await Profile.findOne({ email: issue.reporterEmail });
+      if (!profile || profile.notifyByEmail !== false) {
+        const subject = `Status update for your report: ${issue.title}`;
+        const text = `The status of your report "${issue.title}" has changed to: ${status}`;
+        sendEmail(issue.reporterEmail, subject, text, `<p>${text}</p>`).catch(() => {});
+      } else {
+        console.log(`Skipping status-change email to ${issue.reporterEmail} because notifyByEmail is false`);
+      }
+    } catch (e) {
+      console.warn('Error checking profile for notify preference:', e && e.message ? e.message : e);
+    }
+  }
   res.json(issue);
 });
 // Create event (NGO)
@@ -244,6 +456,39 @@ app.post('/api/ngos/:email/follow', async (req, res) => {
   res.json(ngo);
 });
 
+// Add wishlist item to an event
+app.post('/api/events/:id/wishlist', async (req, res) => {
+  const { id } = req.params;
+  const { item, quantity } = req.body || {};
+  const event = await Event.findById(id);
+  if (!event) return res.status(404).json({ error: 'Event not found' });
+  event.wishlist = event.wishlist || [];
+  event.wishlist.push({ item, quantity: quantity || 1, donated: 0 });
+  await event.save();
+  res.json(event);
+});
+
+// Donate to a specific wishlist item by name
+app.post('/api/events/:id/donate-item', async (req, res) => {
+  const { id } = req.params;
+  const { item, quantity } = req.body || {};
+  const event = await Event.findById(id);
+  if (!event) return res.status(404).json({ error: 'Event not found' });
+  const wishlistItem = event.wishlist.find(w => w.item === item);
+  if (!wishlistItem) return res.status(404).json({ error: 'Wishlist item not found' });
+  wishlistItem.donated = (wishlistItem.donated || 0) + (quantity || 1);
+  await event.save();
+  res.json(event);
+});
+
+// NGO impact stats (public)
+app.get('/api/ngos/:email/stats', async (req, res) => {
+  const ngo = await NGO.findOne({ email: req.params.email });
+  if (!ngo) return res.status(404).json({ error: 'NGO not found' });
+  // Return stored impactStats and compute any additional aggregates if needed
+  res.json({ impactStats: ngo.impactStats, followers: (ngo.followers || []).length });
+});
+
 app.post('/api/issues', async (req, res) => {
   const body = req.body || {};
   const createPayload = {
@@ -274,6 +519,25 @@ app.put('/api/issues/:id', async (req, res) => {
   res.json(issue);
 });
 
+// Upload attachment for an issue (multipart/form-data)
+app.post('/api/issues/:id/attachments', upload.single('file'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const file = req.file;
+    if (!file) return res.status(400).json({ error: 'file is required' });
+    const issue = await Issue.findById(id);
+    if (!issue) return res.status(404).json({ error: 'Issue not found' });
+    const fileUrl = `/uploads/${file.filename}`;
+    issue.attachments = issue.attachments || [];
+    issue.attachments.push({ url: fileUrl, filename: file.originalname, contentType: file.mimetype });
+    await issue.save();
+    res.json(issue);
+  } catch (e) {
+    console.error('Upload failed', e && e.message ? e.message : e);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
 // Add an update (progress/status) to an issue with audit
 app.post('/api/issues/:id/add-update', async (req, res) => {
   const { id } = req.params;
@@ -293,6 +557,21 @@ app.post('/api/issues/:id/add-update', async (req, res) => {
   }
 
   await issue.save();
+  // notify reporter if present
+  if (issue.reporterEmail) {
+    try {
+      const profile = await Profile.findOne({ email: issue.reporterEmail });
+      if (!profile || profile.notifyByEmail !== false) {
+        const subject = `Update on your report: ${issue.title}`;
+        const text = `${updateObj.by} posted: ${updateObj.text}`;
+        sendEmail(issue.reporterEmail, subject, text, `<p>${text}</p>`).catch(() => {});
+      } else {
+        console.log(`Skipping add-update email to ${issue.reporterEmail} because notifyByEmail is false`);
+      }
+    } catch (e) {
+      console.warn('Error checking profile for notify preference:', e && e.message ? e.message : e);
+    }
+  }
   res.json(issue);
 });
 
@@ -322,7 +601,7 @@ app.get('/api/profile', async (req, res) => {
     // Seed profile from User if available
     const user = await User.findOne({ email });
     if (user) {
-      profile = await Profile.create({ fullName: user.fullName || '', email: user.email });
+      profile = await Profile.create({ fullName: user.fullName || '', email: user.email, notifyByEmail: true });
     }
   }
   res.json(profile || null);
@@ -331,6 +610,8 @@ app.get('/api/profile', async (req, res) => {
 app.post('/api/profile', async (req, res) => {
   const body = req.body || {};
   if (!body.email) return res.status(400).json({ error: 'email is required' });
+  // Ensure notifyByEmail is boolean (default true)
+  if (typeof body.notifyByEmail === 'undefined') body.notifyByEmail = true;
   const profile = await Profile.findOneAndUpdate({ email: body.email }, body, { new: true, upsert: true });
   res.json(profile);
 });

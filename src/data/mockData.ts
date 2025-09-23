@@ -18,29 +18,13 @@ export interface Issue {
   priority: 'low' | 'medium' | 'high' | 'critical';
   department?: string;
   estimatedResolution?: string;
+  _id?: string;
+  escalated?: boolean;
 }
 
 export const mockIssues: Issue[] = [
   {
     id: '1',
-    title: 'Large Pothole on Main Street',
-    description: 'Deep pothole causing damage to vehicles near the intersection',
-    category: 'pothole',
-    status: 'verified',
-    location: {
-      lat: 40.7128,
-      lng: -74.0060,
-      address: '123 Main Street, Downtown'
-    },
-    reportedBy: 'John Doe',
-    reportedAt: '2024-01-15T10:30:00Z',
-    verificationCount: 8,
-    priority: 'high',
-    department: 'Public Works',
-    estimatedResolution: '2024-01-20'
-  },
-  {
-    id: '2',
     title: 'Broken Streetlight',
     description: 'Streetlight has been out for 3 days, creating safety concerns',
     category: 'streetlight',
@@ -58,7 +42,7 @@ export const mockIssues: Issue[] = [
     estimatedResolution: '2024-01-18'
   },
   {
-    id: '3',
+    id: '2',
     title: 'Overflowing Trash Bin',
     description: 'Public trash bin overflowing for several days, attracting pests',
     category: 'trash',
@@ -75,25 +59,7 @@ export const mockIssues: Issue[] = [
     estimatedResolution: '2024-01-19'
   },
   {
-    id: '4',
-    title: 'Water Main Leak',
-    description: 'Large puddle forming due to underground water leak',
-    category: 'water',
-    status: 'verified',
-    location: {
-      lat: 40.7282,
-      lng: -74.0776,
-      address: '321 River Street, Financial District'
-    },
-    reportedBy: 'Lisa Rodriguez',
-    reportedAt: '2024-01-13T14:20:00Z',
-    verificationCount: 15,
-    priority: 'critical',
-    department: 'Water Department',
-    estimatedResolution: '2024-01-17'
-  },
-  {
-    id: '5',
+    id: '3',
     title: 'Damaged Sidewalk',
     description: 'Cracked sidewalk creating tripping hazard for pedestrians',
     category: 'other',
