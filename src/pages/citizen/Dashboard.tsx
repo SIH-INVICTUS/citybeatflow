@@ -9,6 +9,7 @@ import Header from "@/components/layout/Header";
 import StatusBadge from "@/components/civic/StatusBadge";
 import { mockIssues, categoryIcons, type Issue } from "@/data/mockData";
 import { getStoredIssues } from "@/lib/issuesStorage";
+import { apiGet, apiPost } from "@/lib/api";
 import { municipalCenter, withinRadius } from "@/lib/geo";
 import { useNavigate } from "react-router-dom";
 
@@ -20,11 +21,25 @@ const CitizenDashboard = () => {
   const [nearbyIssues, setNearbyIssues] = useState<Issue[]>([]);
 
   useEffect(() => {
-    const local = getStoredIssues();
-    setUserIssues(local);
-    const all = [...local, ...mockIssues];
-    const filtered = all.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
-    setNearbyIssues(filtered);
+    (async () => {
+      const email = localStorage.getItem('auth_email') || undefined;
+      const local = getStoredIssues();
+      setUserIssues(local);
+      try {
+        const [serverIssues, myServerIssues] = await Promise.all([
+          apiGet<Issue[]>("/api/issues"),
+          email ? apiGet<Issue[]>(`/api/issues?reporter=${encodeURIComponent(email)}`) : Promise.resolve([] as Issue[]),
+        ]);
+        const all = [...local, ...serverIssues];
+        const filtered = all.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
+        setNearbyIssues(filtered);
+        if (myServerIssues.length) setUserIssues(myServerIssues);
+      } catch {
+        const all = [...local, ...mockIssues];
+        const filtered = all.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
+        setNearbyIssues(filtered);
+      }
+    })();
   }, []);
 
   const stats = [
@@ -32,6 +47,15 @@ const CitizenDashboard = () => {
     { label: "Resolved", value: String(nearbyIssues.filter(i => i.status === 'resolved').length), icon: Home, onClick: () => setActiveTab('community') },
     { label: "Community Impact", value: String(nearbyIssues.reduce((a, i) => a + i.verificationCount, 0)), icon: Users, onClick: () => setActiveTab('community') }
   ];
+
+  const escalateReport = async (id: string) => {
+    try {
+      await apiPost(`/api/issues/${id}/escalate`, {});
+      setUserIssues(prev => prev.map(u => u._id === id ? { ...u, escalated: true } : u));
+    } catch (err) {
+      // ignore
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background">
@@ -165,6 +189,28 @@ const CitizenDashboard = () => {
                       </div>
                     </div>
                   ))}
+                    {userIssues.map(u => (
+                      <Card key={u._id}>
+                        <CardContent>
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="font-semibold">{u.title}</div>
+                              <div className="text-sm text-muted-foreground">{u.description}</div>
+                              {u.escalated && <div className="text-xs text-warning">Escalated</div>}
+                            </div>
+                            <div className="text-right">
+                              <StatusBadge status={u.status as any} />
+                            </div>
+                          </div>
+                          <div className="pt-3 flex gap-2">
+                            {!u.escalated && (
+                              <Button variant="outline" onClick={() => escalateReport(u._id)}>Escalate</Button>
+                            )}
+                            <Button onClick={() => navigate(`/citizen/report/${u._id}`)}>View</Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                 </div>
               </CardContent>
             </Card>

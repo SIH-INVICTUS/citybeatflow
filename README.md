@@ -34,6 +34,26 @@ npm i
 
 # Step 4: Start the development server with auto-reloading and an instant preview.
 npm run dev
+
+# Backend API (Express + MongoDB)
+
+Create `server/.env` with:
+
+```
+MONGODB_URI=your-mongodb-uri
+MONGODB_DB=citybeatflow
+PORT=4000
+JWT_SECRET=change-me
+```
+
+Install and run the server:
+
+```
+npm install --prefix server
+npm run dev --prefix server
+```
+
+Frontend will call the API at `http://localhost:4000` by default. To change it, set `VITE_API_BASE_URL` in a root `.env`.
 ```
 
 **Edit a file directly in GitHub**

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Users, CheckCircle, Shield } from "lucide-react";
 import Header from "@/components/layout/Header";
 import { useToast } from "@/hooks/use-toast";
+import { apiPost, setAuthToken } from "@/lib/api";
 
 const Auth = () => {
   const navigate = useNavigate();
@@ -17,26 +18,49 @@ const Auth = () => {
   const [userType, setUserType] = useState<'citizen' | 'ngo' | 'admin'>(defaultType as 'citizen' | 'ngo' | 'admin');
   const [isLogin, setIsLogin] = useState(true);
   const [rolePasscode, setRolePasscode] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const { toast } = useToast();
 
-  const handleAuth = (e: React.FormEvent) => {
+  const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Require role passcode for privileged roles
-    if ((userType === 'ngo' && rolePasscode !== 'NGO25') || (userType === 'admin' && rolePasscode !== 'ADMIN25')) {
-      toast({
-        title: "Invalid role passcode",
-        description: "Please enter the correct passcode for the selected role.",
-        variant: "destructive",
-      });
-      return;
+    const form = e.target as HTMLFormElement;
+    const email = (form.querySelector('#email') as HTMLInputElement)?.value;
+    const password = (form.querySelector('#password') as HTMLInputElement)?.value;
+    const fullName = (form.querySelector('#name') as HTMLInputElement)?.value;
+    const organization = (form.querySelector('#organization') as HTMLInputElement)?.value;
+
+    try {
+      setIsSubmitting(true);
+      if (isLogin) {
+        const res = await apiPost<{ token: string; user: { role: string } }>("/api/auth/login", { email, password });
+        setAuthToken(res.token);
+        localStorage.setItem('auth_token', res.token);
+        localStorage.setItem('auth_email', email || '');
+        localStorage.setItem('auth_role', res.user.role || 'citizen');
+        const routes: Record<string, string> = { citizen: '/citizen/dashboard', ngo: '/citizen/dashboard', admin: '/admin/dashboard' };
+        navigate(routes[res.user.role] || '/');
+      } else {
+        // Require role passcode only for NGO/Admin at signup
+        if ((userType === 'ngo' && rolePasscode !== 'NGO25') || (userType === 'admin' && rolePasscode !== 'ADMIN25')) {
+          toast({ title: "Invalid role passcode", description: "Please enter the correct passcode for the selected role.", variant: "destructive" });
+          return;
+        }
+        const payload: any = { fullName, email, password, role: userType, organization };
+        if (userType === 'ngo' || userType === 'admin') payload.rolePasscode = rolePasscode;
+        const res = await apiPost<{ token: string; user: { role: string } }>("/api/auth/signup", payload);
+        setAuthToken(res.token);
+        localStorage.setItem('auth_token', res.token);
+        localStorage.setItem('auth_email', email || '');
+        localStorage.setItem('auth_role', res.user.role || 'citizen');
+        const routes: Record<string, string> = { citizen: '/citizen/dashboard', ngo: '/citizen/dashboard', admin: '/admin/dashboard' };
+        navigate(routes[res.user.role] || '/');
+      }
+    } catch (err: any) {
+      toast({ title: 'Authentication failed', description: err.message || 'Please try again', variant: 'destructive' });
+    } finally {
+      setIsSubmitting(false);
     }
-    // Simulate authentication
-    const dashboardRoutes = {
-      citizen: '/citizen/dashboard',
-      ngo: '/ngo/dashboard', 
-      admin: '/admin/dashboard'
-    };
-    navigate(dashboardRoutes[userType]);
   };
 
   const userTypeConfig = {
@@ -106,27 +130,32 @@ const Auth = () => {
                   <Input 
                     id="email"
                     type="email" 
-                    placeholder="Enter your email"
+                    placeholder="you@example.com"
                     required
                   />
                 </div>
                 
                 <div className="space-y-2">
                   <Label htmlFor="password">Password</Label>
-                  <Input 
-                    id="password"
-                    type="password" 
-                    placeholder="Enter your password"
-                    required
-                  />
+                  <div className="flex gap-2">
+                    <Input 
+                      id="password"
+                      type={showPassword ? 'text' : 'password'} 
+                      placeholder={isLogin ? 'Your password' : 'Min 6 characters'}
+                      required
+                    />
+                    <Button type="button" variant="outline" onClick={() => setShowPassword(!showPassword)}>
+                      {showPassword ? 'Hide' : 'Show'}
+                    </Button>
+                  </div>
                 </div>
 
-                {(userType === 'ngo' || userType === 'admin') && (
+                {!isLogin && (userType === 'ngo' || userType === 'admin') && (
                   <div className="space-y-2">
                     <Label htmlFor="role-passcode">Role Passcode</Label>
                     <Input
                       id="role-passcode"
-                      placeholder={userType === 'admin' ? 'Enter Passcode' : 'Enter Passcode'}
+                      placeholder={userType === 'admin' ? 'Enter ADMIN25' : 'Enter NGO25'}
                       value={rolePasscode}
                       onChange={(e) => setRolePasscode(e.target.value)}
                       required
@@ -141,7 +170,7 @@ const Auth = () => {
                       <Label htmlFor="name">Full Name</Label>
                       <Input 
                         id="name"
-                        placeholder="Enter your full name"
+                        placeholder="e.g. Priya Sharma"
                         required
                       />
                     </div>
@@ -149,11 +178,7 @@ const Auth = () => {
                     {userType === 'ngo' && (
                       <div className="space-y-2">
                         <Label htmlFor="organization">Organization Name</Label>
-                        <Input 
-                          id="organization"
-                          placeholder="Enter organization name"
-                          required
-                        />
+                        <Input id="organization" placeholder="e.g. City Helpers Foundation" required />
                       </div>
                     )}
                   </>
@@ -164,8 +189,9 @@ const Auth = () => {
                   variant="civic"
                   className="w-full"
                   size="lg"
+                  disabled={isSubmitting}
                 >
-                  {isLogin ? 'Sign In' : 'Create Account'}
+                  {isSubmitting ? (isLogin ? 'Signing in...' : 'Creating account...') : (isLogin ? 'Sign In' : 'Create Account')}
                 </Button>
               </form>
 

@@ -11,6 +11,7 @@ import Header from "@/components/layout/Header";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { addNewIssue } from "@/lib/issuesStorage";
+import { apiPost } from "@/lib/api";
 
 const ReportIssue = () => {
   const navigate = useNavigate();
@@ -138,7 +139,7 @@ const ReportIssue = () => {
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.category || !formData.title || !formData.description) {
@@ -150,15 +151,38 @@ const ReportIssue = () => {
       return;
     }
 
-    // Save locally so it shows in My Reports and Map
-    addNewIssue({
-      title: formData.title,
-      description: formData.description,
-      category: formData.category,
-      locationText: formData.location,
-      locationCoords: currentLocation,
-      urgency: formData.urgency as any,
-    });
+    // Send to backend API
+    try {
+      const payload = {
+        title: formData.title,
+        description: formData.description,
+        category: formData.category,
+        location: {
+          lat: currentLocation?.lat ?? 0,
+          lng: currentLocation?.lng ?? 0,
+          address: formData.location || "",
+        },
+        priority: formData.urgency,
+        reporterEmail: localStorage.getItem('auth_email') || undefined,
+        attachments: formData.photos.map(p => ({ filename: p.name, contentType: p.type }))
+      };
+      await apiPost("/api/issues", payload);
+    } catch (err) {
+      console.error(err);
+      toast({
+        title: "Submission failed",
+        description: "Could not submit to server. Saved locally instead.",
+        variant: "destructive",
+      });
+      addNewIssue({
+        title: formData.title,
+        description: formData.description,
+        category: formData.category,
+        locationText: formData.location,
+        locationCoords: currentLocation,
+        urgency: formData.urgency as any,
+      });
+    }
     
     toast({
       title: "Report Submitted",

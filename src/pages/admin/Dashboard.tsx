@@ -1,4 +1,4 @@
-import { useState } from "react";
+// ...existing code...
 import { BarChart3, Users, CheckCircle, Clock, Filter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,8 @@ import StatusBadge from "@/components/civic/StatusBadge";
 import { mockIssues, categoryIcons, departmentColors } from "@/data/mockData";
 import { getStoredIssues } from "@/lib/issuesStorage";
 import { municipalCenter, withinRadius } from "@/lib/geo";
+import { useEffect, useState } from "react";
+import { apiGet, apiPut } from "@/lib/api";
 
 const AdminDashboard = () => {
   const [filterStatus, setFilterStatus] = useState<string>("all");
@@ -46,7 +48,20 @@ const AdminDashboard = () => {
     }
   ];
 
-  const allIssues = [...getStoredIssues(), ...mockIssues];
+  const [serverIssues, setServerIssues] = useState<any[]>([]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const issues = await apiGet<any[]>('/api/issues');
+        setServerIssues(issues || []);
+      } catch {
+        setServerIssues([]);
+      }
+    })();
+  }, []);
+
+  const allIssues = [...getStoredIssues(), ...mockIssues, ...serverIssues];
   const muniScoped = allIssues.filter(i => withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 50));
   const filteredIssues = muniScoped.filter(issue => {
     const statusMatch = filterStatus === "all" || issue.status === filterStatus;
@@ -217,12 +232,20 @@ const AdminDashboard = () => {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <Button variant="civic" size="sm">
+                    <Button variant="civic" size="sm" onClick={() => alert('View details not implemented') }>
                       View Details
                     </Button>
-                    <Button variant="outline" size="sm">
-                      Update Status
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={async () => { await apiPut(`/api/issues/${issue._id || issue.id}/status`, { status: 'in-progress' }); alert('Marked in-progress'); }}>
+                        Start Processing
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={async () => { await apiPut(`/api/issues/${issue._id || issue.id}/status`, { status: 'rejected' }); alert('Rejected'); }}>
+                        Reject
+                      </Button>
+                      <Button variant="civic" size="sm" onClick={async () => { await apiPut(`/api/issues/${issue._id || issue.id}/status`, { status: 'solved' }); alert('Marked solved'); }}>
+                        Mark Solved
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))}
