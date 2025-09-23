@@ -9,7 +9,7 @@ import Header from "@/components/layout/Header";
 import StatusBadge from "@/components/civic/StatusBadge";
 import { mockIssues, categoryIcons, departmentColors } from "@/data/mockData";
 import { getStoredIssues } from "@/lib/issuesStorage";
-import { municipalCenter, withinRadius } from "@/lib/geo";
+import { withinRadius, LatLng } from "@/lib/geo";
 import { useEffect, useState } from "react";
 import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { useNavigate } from 'react-router-dom';
@@ -50,6 +50,7 @@ const AdminDashboard = () => {
   ];
 
   const [serverIssues, setServerIssues] = useState<any[]>([]);
+  const [userCenter, setUserCenter] = useState<LatLng | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -63,12 +64,21 @@ const AdminDashboard = () => {
     })();
   }, []);
 
+  // attempt to get browser geolocation for scoping issues
+  useEffect(() => {
+    if (!navigator?.geolocation) return;
+    const timeout = setTimeout(() => setUserCenter(null), 4000);
+    navigator.geolocation.getCurrentPosition(
+      (p) => { clearTimeout(timeout); setUserCenter({ lat: p.coords.latitude, lng: p.coords.longitude }); },
+      () => { clearTimeout(timeout); setUserCenter(null); },
+      { maximumAge: 1000 * 60 * 5, timeout: 4000 }
+    );
+  }, []);
+
   const allIssues = [...getStoredIssues(), ...mockIssues, ...serverIssues];
-  const muniScoped = allIssues.filter(i => {
-    if (!i?.location || typeof i.location.lat !== 'number' || typeof i.location.lng !== 'number') return false;
-    return withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 50);
-  });
-  const filteredIssues = muniScoped.filter(issue => {
+  const muniScoped = allIssues.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number');
+
+  const filteredIssues = (userCenter ? muniScoped.filter(i => withinRadius(userCenter, { lat: i.location.lat, lng: i.location.lng }, 50)) : muniScoped).filter(issue => {
     const statusMatch = filterStatus === "all" || issue.status === filterStatus;
     const categoryMatch = filterCategory === "all" || issue.category === filterCategory;
     return statusMatch && categoryMatch;

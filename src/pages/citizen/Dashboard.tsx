@@ -10,7 +10,7 @@ import StatusBadge from "@/components/civic/StatusBadge";
 import { mockIssues, categoryIcons, type Issue } from "@/data/mockData";
 import { getStoredIssues } from "@/lib/issuesStorage";
 import { apiGet, apiPost } from "@/lib/api";
-import { municipalCenter, withinRadius } from "@/lib/geo";
+import { withinRadius, LatLng } from "@/lib/geo";
 import { useNavigate } from "react-router-dom";
 
 const CitizenDashboard = () => {
@@ -26,17 +26,29 @@ const CitizenDashboard = () => {
       const local = getStoredIssues();
       setUserIssues(local);
       try {
+        // attempt to get user's current location to scope nearby issues
+        const userPos: LatLng | null = await new Promise((resolve) => {
+          if (!navigator?.geolocation) return resolve(null);
+          const timeout = setTimeout(() => resolve(null), 4000);
+          navigator.geolocation.getCurrentPosition(
+            (p) => { clearTimeout(timeout); resolve({ lat: p.coords.latitude, lng: p.coords.longitude }); },
+            () => { clearTimeout(timeout); resolve(null); },
+            { maximumAge: 1000 * 60 * 5, timeout: 4000 }
+          );
+        });
         const [serverIssues, myServerIssues] = await Promise.all([
           apiGet<Issue[]>("/api/issues"),
           email ? apiGet<Issue[]>(`/api/issues?reporter=${encodeURIComponent(email)}`) : Promise.resolve([] as Issue[]),
         ]);
         const all = [...local, ...serverIssues];
-        const filtered = all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number' && withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
+        const filtered = userPos
+          ? all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number' && withinRadius(userPos, { lat: i.location.lat, lng: i.location.lng }, 15))
+          : all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number');
         setNearbyIssues(filtered);
         if (myServerIssues.length) setUserIssues(myServerIssues);
       } catch {
         const all = [...local, ...mockIssues];
-        const filtered = all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number' && withinRadius(municipalCenter, { lat: i.location.lat, lng: i.location.lng }, 15));
+        const filtered = all.filter(i => i?.location && typeof i.location.lat === 'number' && typeof i.location.lng === 'number');
         setNearbyIssues(filtered);
       }
     })();

@@ -1,8 +1,5 @@
 export type LatLng = { lat: number; lng: number };
 
-// Tadepalligudem Municipal Office (approximate center)
-export const municipalCenter: LatLng = { lat: 16.813, lng: 81.527 };
-
 export function toRadians(deg: number): number {
   return (deg * Math.PI) / 180;
 }
